@@ -1,0 +1,93 @@
+#Spark streaming application to pull data from Kafka topic and storing it in HDFS 
+
+spark.conf.set('spark.sql.shuffle.partitions', '1')
+pyspark --packages "org.apache.spark:spark-sql-kafka-0-10_2.11:2.4.5"
+
+from pyspark.sql.types import StructField, StructType, IntegerType, LongType, DoubleType, TimestampType, StringType
+from pyspark.sql.functions import from_json, col
+
+#DataFrame for Trip data received from Kafka
+
+tripStructure = StructType([
+StructField("ID", IntegerType(), True),
+StructField("Booking_ID", IntegerType(), True),
+StructField("Source_Latitude", DoubleType(), True),
+StructField("Souce_Longitude", DoubleType(), True),
+StructField("Target_Latitude", DoubleType(), True),
+StructField("Target_Longitude", DoubleType(), True),
+StructField("Time_Taken", IntegerType(), True),
+StructField("Created_At", TimestampType(), True),
+StructField("Updated_At", TimestampType(), True)])
+
+tripSchema = StructType([
+StructField("Data", tripStructure, True),
+StructField("Old", tripStructure, True),
+StructField("Type", StringType(), True),
+StructField("Timestamp", LongType(), True)])
+
+#DataFrame for Booking data received from Kafka
+
+bookingStructure = StructType([
+StructField("ID", IntegerType(), True),
+StructField("User_ID", IntegerType(), True),
+StructField("Latitude", DoubleType(), True),
+StructField("Longitude", DoubleType(), True),
+StructField("Created_At", TimestampType(), True),
+StructField("Updated_At", TimestampType(), True)])
+
+bookingSchema = StructType([
+StructField("Data", bookingStructure, True),
+StructField("Old", bookingStructure, True),
+StructField("Type", StringType(), True),
+StructField("Timestamp", LongType(), True)])
+
+#Reading Booking data from Kafka
+
+bookingDf = spark \
+.readStream \
+.format("kafka") \
+.option("subscribe", "test_analysis_ss_booking") \
+.option("startingoffsets", "earliest") \
+.option("kafka.bootstrap.servers", "localhost:9092") \
+.load() \
+.selectExpr("CAST (value as STRING) as value", "CAST (timestamp as LONG) as timestamp")
+
+#Processing Booking data before writing to HDFS
+
+bookingProc = bookingDf \
+.select(from_json(col("value"), bookingSchema).alias("raw_data"), col("timestamp")) \
+.select(col("raw_data.data").alias("data"), col("raw_data.old").alias("old_data"), col("raw_data.type"), col("timestamp")) \
+.writeStream \
+.format("parquet") \
+.option("path", "/home/ec2-user/processed_data_ss/booking") \
+.trigger(processingTime='2 minutes') \
+.option("checkpointLocation", "/home/ec2-user/checkpoint_ss/booking") \
+.outputMode("append")
+
+#Reading Trip data from Kafka
+
+tripDf = spark \
+.readStream \
+.format("kafka") \
+.option("subscribe", "test_analysis_ss_trip/booking") \
+.option("startingoffsets", "earliest") \
+.option("kafka.bootstrap.servers", "localhost:9092") \
+.load() \
+.selectExpr("CAST (value as STRING) as value", "CAST (timestamp as LONG) as timestamp")
+
+#Processing Trip data before writing to HDFS
+
+tripProc = bookingDf \
+.select(from_json(col("value"), bookingSchema).alias("raw_data"), col("timestamp")) \
+.select(col("raw_data.data").alias("data"), col("raw_data.old").alias("old_data"), col("raw_data.type"), col("timestamp")) \
+.writeStream \
+.format("parquet") \
+.option("path", "/home/ec2-user/processed_data_ss/trip") \
+.trigger(processingTime='2 minutes') \
+.option("checkpointLocation", "/home/ec2-user/checkpoint_ss/trip") \
+.outputMode("append")
+
+#Starting spark streaming for Booking and Trip data
+
+tripProc.start()
+bookingProc.start()

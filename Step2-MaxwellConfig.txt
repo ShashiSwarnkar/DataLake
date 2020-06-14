@@ -1,0 +1,11 @@
+#MAXWELL CONFIG
+
+maxwell \
+--user='ss_maxwell_user' \
+--password='ss_maxwell_password' \
+--host='bookingdb.ck5ydxhhzvgx.us-east-1.rds.amazonaws.com' \
+--producer='kafka' \
+--kafka.bootstrap.server='localhost:9092' \
+--kafka_topic='shashi_%{database}_%{table}' \
+--schema_database=ss_maxwell_state \
+--daemon

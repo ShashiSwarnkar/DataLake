@@ -1,0 +1,53 @@
+# Spark Data Processing Application: Process the data to have the latest copy of the record
+
+/home/ec2-user/processed_data_ss/snapshot/booking
+
+bookingRaw = path.exists('/home/ec2-user/processed_data_ss/booking') #Raw data directory
+bookingFinalSS = path.exists('/home/ec2-user/processed_data_ss/snapshot/booking') #Processed data directory
+
+tripRaw = path.exists('/home/ec2-user/processed_data_ss/trip') #Raw data directory
+tripFinalSS = path.exists('/home/ec2-user/processed_data_ss/snapshot/trip') #Processed data directory
+
+bookingEmptyDf = spark.createDataFrame(spark.sparkContext.emptyRDD(), bookingStructure)
+tripEmptyDf = spark.createDataFrame(spark.sparkContext.emptyRDD(), tripStructure)
+
+bookingRawDf = spark.read.parquet('/home/ec2-user/processed_data_ss/booking').select("data.*", "type", "timestamp") if bookingRaw else bookingEmptyDf
+tripRawDf = spark.read.parquet('/home/ec2-user/processed_data_ss/trip').select("data.*", "type", "timestamp") if tripRaw else tripEmptyDf
+
+bookingSnapshotDf = spark.read.parquet('/home/ec2-user/processed_data_ss/snapshot/booking').withColumn("type", lit("insert")).withColumn("timestamp", lit(0)) if bookingFinalSS else bookingEmptyDf
+tripSnapshotDf = spark.read.parquet('/home/ec2-user/processed_data_ss/snapshot/trip').withColumn("type", lit("insert")).withColumn("timestamp", lit(0)) if tripFinalSS else tripEmptyDf
+
+from pyspark.sql.window import window
+from pyspark.sql.functions import desc
+
+#Window Function for Separating Data
+
+windowFunction = window \
+.partitionBy("id") \
+.orderBy(desc("timestamp"))
+
+from pyspark.sql.functions import col, row_number
+
+# Removing the old and deleted copies of the record for Booking Table
+ 
+mergedBookingDf = bookingRawDf.union(bookingSnapshotDf) \
+.withColumn("row_num", row_number().over(windowFuntion)) \
+.filter("row_num = 1") \
+.filter("type != delete") \
+.drop("row_num", "type", "timestamp")
+
+# Removing the old and deleted copies of the record for Trip Table
+
+mergedTripDf = tripRawDf.union(tripSnapshotDf) \
+.withColumn("row_num", row_number().over(windowFuntion)) \
+.filter("row_num = 1") \
+.filter("type != delete") \
+.drop("row_num", "type", "timestamp")
+
+#Writing the Data to HDFS after processing 
+
+mergedBookingDf.write.mode("overwrite").parquet("/home/ec2-user/processed_data_ss/temp/booking")
+spark.read.parquet("/home/ec2-user/processed_data_ss/temp/booking").write.mode("overwrite").parquet("/home/ec2-user/processed_data_ss/snapshot/booking")
+
+mergedTripDf.write.mode("overwrite").parquet("/home/ec2-user/processed_data_ss/temp/trip")
+spark.read.parquet("/home/ec2-user/processed_data_ss/temp/trip").write.mode("overwrite").parquet("/home/ec2-user/processed_data_ss/snapshot/trip")
